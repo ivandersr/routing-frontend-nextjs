@@ -1,67 +1,68 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { ChangeEvent, useEffect, useRef } from "react";
 import { useMap } from "../../hooks/useMap";
 import { socket } from "@/src/utils/socket-io";
 
 export type MapDriverProps = {
-  route_id: string | null;
-  start_location: {
-    lat: number;
-    lng: number;
-  } | null;
-  end_location: {
-    lat: number;
-    lng: number;
-  } | null;
+  routeIdElementId: string;
 };
 
 export function MapDriver({
-  route_id,
-  start_location,
-  end_location,
+  routeIdElementId,
 }: MapDriverProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const map = useMap(mapContainerRef);
 
+ 
   useEffect(() => {
-    if (!map || !route_id || !start_location || !end_location) {
+    if (!map || !routeIdElementId) {
       return;
     }
-
-    if (socket.disconnected) {
-      socket.connect();
-    } else {
-      socket.offAny();
-    }
-
-    socket.on("connect", () => {
-      console.log("connected to websockets");
-      socket.emit("client:new-points", { route_id });
-    });
-
-    socket.on(
-      `server:new-points/${route_id}:list`,
-      (data: { route_id: string; lat: number; lng: number }) => {
-        if (!map.hasRoute(route_id)) {
-          map.addRouteWithIcons({
-            routeId: route_id,
-            startMarkerOptions: {
-              position: start_location,
-            },
-            endMarkerOptions: {
-              position: end_location,
-            },
-            carMarkerOptions: {
-              position: start_location,
-            },
-          });
-        } else {
-          map.moveCar(route_id, { lat: data.lat, lng: data.lng });
-        }
+    const handler = async (event: any) => {
+      if (socket.disconnected) {
+        socket.connect();
+      } else {
+        socket.offAny();
       }
-    );
-  }, [route_id, start_location, end_location, map]);
+  
+      // @ts-ignore-next-line
+      const routeId = event.target.value;
+  
+      socket.on(
+        `server:new-points/${routeId}:list`,
+        async (data: { route_id: string; lat: number; lng: number }) => {
+          if (!map.hasRoute(data.route_id)) {
+            const response = await fetch(
+              `${process.env.NEXT_PUBLIC_NEXT_API_URL}/routes/${data.route_id}`
+            );
+            const route = await response.json();
+            map.addRouteWithIcons({
+              routeId: data.route_id,
+              startMarkerOptions: {
+                position: route.directions.routes[0].legs[0].start_location,
+              },
+              endMarkerOptions: {
+                position: route.directions.routes[0].legs[0].end_location,
+              },
+              carMarkerOptions: {
+                position: route.directions.routes[0].legs[0].start_location,
+              },
+            });
+          } else {
+            map.moveCar(data.route_id, { lat: data.lat, lng: data.lng });
+          }
+        }
+      );
+    }
+  
+    const selectElement = document.querySelector(`#${routeIdElementId}`) as HTMLSelectElement;
+    selectElement.addEventListener("change", handler);
+    return () => {
+      selectElement.removeEventListener("change", handler);
+      socket.disconnect();
+    };    
+  }, [routeIdElementId, map]);
 
   return <div className="w-2/3 h-screen" ref={mapContainerRef} />;
 }
